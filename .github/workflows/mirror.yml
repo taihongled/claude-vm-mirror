@@ -1,39 +1,28 @@
-name: mirror-claude-vm
+name: mirror-claude-vm-v2
 on:
   workflow_dispatch:
-  push:
 jobs:
   mirror:
-    permissions:
-      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
-      - name: Download current VM bundle 072b6cbf (x64)
+      - name: Probe and download vmlinuz/initrd
         run: |
           mkdir -p out
           BASE="https://downloads.claude.ai/vms/linux/x64/072b6cbfe74f428a98bd86035f83b322b369d1f1"
-          curl -sSL --retry 5 -o out/rootfs.vhdx.zst "$BASE/rootfs.vhdx.zst"
-          curl -sSL --retry 5 -o out/vmlinuz "$BASE/vmlinuz"
-          curl -sSL --retry 5 -o out/initrd "$BASE/initrd"
+          for f in vmlinuz.zst initrd.zst initrd-micro.zst; do
+            code=$(curl -sSL -f -o "out/$f" -w "%{http_code}" "$BASE/$f" || echo FAIL)
+            echo "$f -> $code $(stat -c%s out/$f 2>/dev/null)"
+          done
           sha256sum out/* | tee hashes.txt
-          echo "expected: rootfs.vhdx.zst = c480f8a62d0d9be20e1a1ee31b9f25c73097f793127dcefa90b0c59ada0e12ad"
-          echo "expected: vmlinuz = 3118616ef6ba3866652284b8b4c224a96876c56091724c35c93caf1ccb9b50a9"
-          echo "expected: initrd = e3c5ce2b8e9e9adf67de7ec83cafa4a0c65fab8a22036a6b53f03c9765b3342a"
+          echo "expected vmlinuz.zst: 3118616ef6ba3866652284b8b4c224a96876c56091724c35c93caf1ccb9b50a9 (14758684 bytes)"
+          echo "expected initrd.zst: e3c5ce2b8e9e9adf67de7ec83cafa4a0c65fab8a22036a6b53f03c9765b3342a (28024101 bytes)"
 
-      - name: Download official CLI zst (2.1.325)
-        run: |
-          curl -sSL --retry 5 -o out/claude-win32-x64.exe.zst "https://downloads.claude.ai/claude-code-releases/2.1.325/win32-x64/claude.exe.zst"
-          curl -sSL --retry 5 -o out/claude-linux-x64.zst "https://downloads.claude.ai/claude-code-releases/2.1.325/linux-x64/claude.zst"
-          sha256sum out/* | tee -a hashes.txt
-          echo "expected: claude-win32-x64.exe.zst = 806e0a45e6f5e6ce201e4ef133dd41a30e235dc2745caceeba2351aed7878792 (134865344 bytes)"
-          echo "expected: claude-linux-x64.zst = 00b1b977bcc3f32eb69129f0ac3277aafb1aecbfb87c17c0af53806832ed436a (132357990 bytes)"
-
-      - name: Publish release
+      - name: Upload to existing release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete claude-vm-072b6cbf --yes --cleanup-tag 2>/dev/null || true
-          gh release create claude-vm-072b6cbf out/* --repo "${{ github.repository }}" \
-            --title "Claude VM bundle 072b6cbf + CLI 2.1.325 official zst" \
-            --notes "$(cat hashes.txt)"
+          gh release upload claude-vm-072b6cbf out/* --clobber --repo "${{ github.repository }}"
+          echo uploaded
